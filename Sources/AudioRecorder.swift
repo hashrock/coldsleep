@@ -52,6 +52,31 @@ class AudioRecorder {
         return url
     }
 
+    /// ファイル名に使えない文字を除去してサニタイズする
+    static func sanitizeForFileName(_ text: String, maxLength: Int = 100) -> String {
+        let truncated = String(text.prefix(maxLength))
+        // ファイル名に使えない文字を置換
+        let illegal = CharacterSet(charactersIn: "/\\:*?\"<>|\n\r\t")
+        let sanitized = truncated.components(separatedBy: illegal).joined(separator: " ")
+        // 連続スペースを1つに
+        let collapsed = sanitized.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 一時ディレクトリ内でファイルをリネームする
+    static func renameInPlace(url: URL, newBaseName: String) -> URL? {
+        let newURL = url.deletingLastPathComponent()
+            .appendingPathComponent(newBaseName)
+            .appendingPathExtension(url.pathExtension)
+        do {
+            try FileManager.default.moveItem(at: url, to: newURL)
+            return newURL
+        } catch {
+            print("リネームエラー: \(error)")
+            return nil
+        }
+    }
+
     /// 一時ディレクトリから保存先へファイルを移動する
     static func moveToSaveDirectory(tempURL: URL) -> URL? {
         let dest = saveDirectory.appendingPathComponent(tempURL.lastPathComponent)

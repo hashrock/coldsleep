@@ -7,21 +7,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var transcriber: Transcriber!
     var isRecording = false
     var recordMenuItem: NSMenuItem!
+    var normalIcon: NSImage?
+    var recordingIcon: NSImage?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            if let iconPath = Bundle.main.path(forResource: "icon", ofType: "png", inDirectory: "MenuBarIcon") {
-                let img = NSImage(contentsOfFile: iconPath)
-                img?.size = NSSize(width: 18, height: 18)
-                img?.isTemplate = true
-                button.image = img
-            } else {
-                button.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "Coldsleep")
-            }
+
+        // 通常アイコン
+        if let iconPath = Bundle.main.path(forResource: "icon", ofType: "png", inDirectory: "MenuBarIcon") {
+            let img = NSImage(contentsOfFile: iconPath)
+            img?.size = NSSize(width: 18, height: 18)
+            img?.isTemplate = true
+            normalIcon = img
+        } else {
+            normalIcon = NSImage(systemSymbolName: "mic", accessibilityDescription: "Coldsleep")
         }
+
+        // 録音中アイコン（赤丸）
+        recordingIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            NSColor.systemRed.setFill()
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 3, dy: 3))
+            circle.fill()
+            return true
+        }
+        recordingIcon?.isTemplate = false
+
+        statusItem.button?.image = normalIcon
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Coldsleep", action: nil, keyEquivalent: ""))
@@ -62,11 +75,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         transcriber.transcribeAndSave(audioURL: tempURL) { [weak self] textURL in
             DispatchQueue.main.async {
-                // 書き起こし完了後、m4a と txt をまとめて保存先へ移動
-                let savedAudio = AudioRecorder.moveToSaveDirectory(tempURL: tempURL)
+                var audioToMove = tempURL
+                var textToMove = textURL
+
+                // 書き起こし成功時、テキスト先頭100文字をファイル名に含める
+                if let textURL = textURL,
+                   let text = try? String(contentsOf: textURL, encoding: .utf8) {
+                    let baseName = tempURL.deletingPathExtension().lastPathComponent
+                    let snippet = AudioRecorder.sanitizeForFileName(text)
+                    if !snippet.isEmpty {
+                        let newBase = "\(baseName)_\(snippet)"
+                        if let renamedAudio = AudioRecorder.renameInPlace(url: audioToMove, newBaseName: newBase) {
+                            audioToMove = renamedAudio
+                        }
+                        if let renamedText = AudioRecorder.renameInPlace(url: textURL, newBaseName: newBase) {
+                            textToMove = renamedText
+                        }
+                    }
+                }
+
+                // 保存先へ移動
+                let savedAudio = AudioRecorder.moveToSaveDirectory(tempURL: audioToMove)
                 var savedText: URL? = nil
-                if let textURL = textURL {
-                    savedText = AudioRecorder.moveToSaveDirectory(tempURL: textURL)
+                if let textToMove = textToMove {
+                    savedText = AudioRecorder.moveToSaveDirectory(tempURL: textToMove)
                 }
                 // エラーファイルがあればそれも移動
                 let errorURL = tempURL.deletingPathExtension().appendingPathExtension("error.txt")
@@ -95,13 +127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateIcon(recording: Bool) {
-        if recording {
-            statusItem.button?.contentTintColor = .systemRed
-            statusItem.button?.image?.isTemplate = false
-        } else {
-            statusItem.button?.contentTintColor = nil
-            statusItem.button?.image?.isTemplate = true
-        }
+        statusItem.button?.image = recording ? recordingIcon : normalIcon
     }
 
     func showNotification(title: String, body: String) {
