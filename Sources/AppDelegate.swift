@@ -52,20 +52,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func stopRecording() {
         guard isRecording else { return }
         isRecording = false
-        let url = recorder.stopRecording()
+        let tempURL = recorder.stopRecording()
         updateIcon(recording: false)
         recordMenuItem.title = "録音開始"
-        if let url = url {
-            showNotification(title: "録音を保存しました", body: url.lastPathComponent)
-            recordMenuItem.title = "書き起こし中..."
-            recordMenuItem.isEnabled = false
-            transcriber.transcribeAndSave(audioURL: url) { [weak self] textURL in
-                DispatchQueue.main.async {
-                    self?.recordMenuItem.title = "録音開始"
-                    self?.recordMenuItem.isEnabled = true
-                    if let textURL = textURL {
-                        self?.showNotification(title: "書き起こし完了", body: textURL.lastPathComponent)
-                    }
+        guard let tempURL = tempURL else { return }
+
+        recordMenuItem.title = "書き起こし中..."
+        recordMenuItem.isEnabled = false
+
+        transcriber.transcribeAndSave(audioURL: tempURL) { [weak self] textURL in
+            DispatchQueue.main.async {
+                // 書き起こし完了後、m4a と txt をまとめて保存先へ移動
+                let savedAudio = AudioRecorder.moveToSaveDirectory(tempURL: tempURL)
+                var savedText: URL? = nil
+                if let textURL = textURL {
+                    savedText = AudioRecorder.moveToSaveDirectory(tempURL: textURL)
+                }
+                // エラーファイルがあればそれも移動
+                let errorURL = tempURL.deletingPathExtension().appendingPathExtension("error.txt")
+                if FileManager.default.fileExists(atPath: errorURL.path) {
+                    _ = AudioRecorder.moveToSaveDirectory(tempURL: errorURL)
+                }
+
+                self?.recordMenuItem.title = "録音開始"
+                self?.recordMenuItem.isEnabled = true
+
+                if let savedText = savedText {
+                    self?.showNotification(title: "書き起こし完了", body: savedText.lastPathComponent)
+                } else if let savedAudio = savedAudio {
+                    self?.showNotification(title: "録音を保存しました", body: "\(savedAudio.lastPathComponent)（書き起こし失敗）")
                 }
             }
         }
